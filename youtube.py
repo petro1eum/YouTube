@@ -122,7 +122,7 @@ def get_youtube_transcript(video_id):
     except _errors.TranscriptsDisabled:
         print("Транскрипты отключены для этого видео.")
         return None
-    except _errors.NoTranscriptAvailable:
+    except _errors.NoTranscriptFound:
         print("Транскрипты недоступны для этого видео.")
         return None
     except Exception as e:
