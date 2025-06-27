@@ -43,3 +43,64 @@ results/
 .vscode/
 *.swp
 *.swo 
+# 🔒 SECURITY & ENVIRONMENT VARIABLES
+.env
+.env.*
+.env.local
+.env.development
+.env.production
+.env.staging
+.env.test
+*.env
+.environment
+
+# 🗝️ API KEYS & SECRETS
+api_keys.txt
+secrets.txt
+*.key
+*.pem
+*.p12
+*.pfx
+config/secrets.yml
+credentials.json
+service-account*.json
+
+# 🔐 AUTH & TOKENS
+.token
+*.token
+auth_token
+access_token
+refresh_token
+jwt_secret
+session_secret
+
+# 💳 DATABASE & CONNECTION STRINGS
+database.yml
+db_config.yml
+connection_string.txt
+
+# 🎯 TELEGRAM & DISCORD BOTS
+bot_token.txt
+telegram_token
+discord_token
+
+# 🤖 AI & ML SECRETS
+openai_key.txt
+anthropic_key.txt
+gemini_key.txt
+huggingface_token
+
+# 📱 MOBILE & CLOUD
+google-services.json
+GoogleService-Info.plist
+aws_credentials
+azure_credentials
+gcp_credentials
+
+# 💼 CERTIFICATES & KEYS
+*.crt
+*.cer
+private_key*
+public_key*
+ssh_keys/
+
