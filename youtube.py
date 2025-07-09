@@ -56,8 +56,15 @@ def download_audio(url, output_dir="temp"):
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
             
-        yt = YouTube(url)
-        print(f"Загрузка аудио из видео: {yt.title}")
+        # Сначала пробуем без po_token
+        try:
+            yt = YouTube(url)
+            print(f"Загрузка аудио из видео: {yt.title}")
+        except Exception as e:
+            print(f"Попытка загрузки без po_token не удалась: {e}")
+            print("Пробуем с use_po_token=True...")
+            yt = YouTube(url, use_po_token=True)
+            print(f"Загрузка аудио из видео: {yt.title}")
         
         # Выбираем аудио поток с самым низким качеством для экономии трафика и времени
         audio_stream = yt.streams.filter(only_audio=True).order_by('abr').first()
@@ -85,8 +92,15 @@ def download_video(url, output_dir="temp", quality="highest"):
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
             
-        yt = YouTube(url)
-        print(f"Загрузка видео для анализа кадров: {yt.title}")
+        # Сначала пробуем без po_token
+        try:
+            yt = YouTube(url)
+            print(f"Загрузка видео для анализа кадров: {yt.title}")
+        except Exception as e:
+            print(f"Попытка загрузки без po_token не удалась: {e}")
+            print("Пробуем с use_po_token=True...")
+            yt = YouTube(url, use_po_token=True)
+            print(f"Загрузка видео для анализа кадров: {yt.title}")
         
         # Выбираем видео поток с наилучшим качеством для лучшего распознавания кода
         if quality == "lowest":
@@ -633,8 +647,13 @@ def main():
             return
     else:
         # Если транскрипт доступен, получаем название видео
-        yt = YouTube(args.url)
-        video_title = yt.title
+        try:
+            yt = YouTube(args.url)
+            video_title = yt.title
+        except Exception as e:
+            print(f"Попытка получения названия без po_token не удалась: {e}")
+            yt = YouTube(args.url, use_po_token=True)
+            video_title = yt.title
     
     if not transcript_segments:
         print("Не удалось получить или создать транскрипт. Прерываем выполнение.")

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Скрипт для получения транскрипта YouTube видео, его анализа и сохранения
+Улучшенный скрипт для получения транскрипта YouTube видео с использованием pytubefix
 """
 
 import os
@@ -9,16 +9,13 @@ import sys
 import json
 import requests
 from dotenv import load_dotenv
-from youtube_transcript_api import YouTubeTranscriptApi, _errors
+from pytubefix import YouTube
 
 def get_video_id(url):
     """Извлечение ID видео из URL YouTube"""
-    # Проверка формата URL
     if "youtu.be" in url:
-        # Формат https://youtu.be/VIDEO_ID
         video_id = url.split("/")[-1].split("?")[0]
     elif "youtube.com/watch" in url:
-        # Формат https://www.youtube.com/watch?v=VIDEO_ID
         import urllib.parse
         query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
         video_id = query.get("v", [None])[0]
@@ -27,29 +24,67 @@ def get_video_id(url):
     
     return video_id
 
-def get_youtube_transcript(video_id, languages=['ru', 'en']):
-    """Получение транскрипта с YouTube, если доступен"""
+def get_transcript_with_pytubefix(url, use_oauth=False):
+    """Получение транскрипта с помощью pytubefix"""
     try:
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=languages)
+        print("Попытка получения транскрипта с помощью pytubefix...")
         
-        # Объединяем все части транскрипта в один текст
-        full_transcript = " ".join([item['text'] for item in transcript_list])
+        # Создаем объект YouTube с OAuth если нужно
+        if use_oauth:
+            print("Используем OAuth аутентификацию...")
+            yt = YouTube(url, use_oauth=True, allow_oauth_cache=True)
+        else:
+            yt = YouTube(url)
         
-        return full_transcript
-    except _errors.TranscriptsDisabled:
-        print("Транскрипты отключены для этого видео.")
-        return None
-    except _errors.NoTranscriptFound:
-        print("Транскрипты недоступны для этого видео.")
-        return None
+        print(f"Название видео: {yt.title}")
+        print(f"Длительность: {yt.length} секунд")
+        
+        # Получаем доступные субтитры
+        captions = yt.captions
+        print(f"Доступные субтитры: {list(captions.keys())}")
+        
+        if not captions:
+            print("Субтитры недоступны для этого видео")
+            return None, yt.title
+        
+        # Пробуем получить русские субтитры, затем английские
+        caption = None
+        for lang in ['a.ru', 'ru', 'a.en', 'en']:
+            if lang in captions:
+                caption = captions[lang]
+                print(f"Используем субтитры на языке: {lang}")
+                break
+        
+        if not caption:
+            # Берем первые доступные субтитры
+            caption_key = list(captions.keys())[0]
+            caption = captions[caption_key]
+            print(f"Используем субтитры: {caption_key}")
+        
+        # Получаем текст субтитров
+        transcript_text = caption.generate_srt_captions()
+        
+        # Очищаем от временных меток SRT
+        lines = transcript_text.split('\n')
+        clean_text = []
+        for line in lines:
+            line = line.strip()
+            # Пропускаем номера субтитров и временные метки
+            if line and not line.isdigit() and '-->' not in line:
+                clean_text.append(line)
+        
+        final_transcript = ' '.join(clean_text)
+        
+        return final_transcript, yt.title
+        
     except Exception as e:
-        print(f"Ошибка при получении транскрипта: {e}")
-        return None
+        print(f"Ошибка при получении транскрипта с pytubefix: {e}")
+        return None, None
 
-def analyze_with_openai(transcript, api_key):
+def analyze_with_openai(transcript, api_key, title="YouTube видео"):
     """Анализ транскрипта с помощью OpenAI API"""
     prompt = f"""
-    Проанализируй следующий транскрипт видео.
+    Проанализируй следующий транскрипт видео "{title}".
     
     Транскрипт:
     {transcript}
@@ -66,7 +101,7 @@ def analyze_with_openai(transcript, api_key):
         }
         
         payload = {
-            "model": "gpt-4.1-mini",
+            "model": "gpt-4o-mini",
             "messages": [
                 {"role": "system", "content": "Ты - аналитик видеоконтента. Твоя задача - выделять ключевые идеи и создавать подробный анализ содержания."},
                 {"role": "user", "content": prompt}
@@ -82,7 +117,6 @@ def analyze_with_openai(transcript, api_key):
         )
         result = response.json()
         
-        # Получаем ответ от API
         if "choices" in result and len(result["choices"]) > 0:
             analysis = result["choices"][0]["message"]["content"]
             return analysis
@@ -93,7 +127,7 @@ def analyze_with_openai(transcript, api_key):
         print(f"Ошибка при анализе транскрипта: {e}")
         return None
 
-def save_results(video_id, transcript, analysis, output_dir="results"):
+def save_results(video_id, video_title, transcript, analysis, output_dir="results"):
     """Сохранение результатов анализа"""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -101,7 +135,8 @@ def save_results(video_id, transcript, analysis, output_dir="results"):
     # Сохраняем в формате Markdown
     md_file = f"{output_dir}/{video_id}_transcript.md"
     with open(md_file, 'w', encoding='utf-8') as f:
-        f.write(f"# Анализ видео YouTube (ID: {video_id})\n\n")
+        f.write(f"# Анализ видео YouTube: {video_title}\n")
+        f.write(f"**ID видео:** {video_id}\n\n")
         f.write(analysis)
         f.write("\n\n## Транскрипт\n\n")
         f.write(transcript)
@@ -112,6 +147,7 @@ def save_results(video_id, transcript, analysis, output_dir="results"):
     json_file = f"{output_dir}/{video_id}_analysis.json"
     results = {
         "video_id": video_id,
+        "video_title": video_title,
         "transcript": transcript,
         "analysis": analysis
     }
@@ -124,14 +160,20 @@ def save_results(video_id, transcript, analysis, output_dir="results"):
     return md_file, json_file
 
 def main():
-    # Загружаем переменные окружения из .env файла
     load_dotenv()
     
     if len(sys.argv) < 2:
-        print("Использование: python get_transcript.py <youtube_url>")
+        print("Использование:")
+        print("  python youtube_improved.py <youtube_url>")
+        print("  python youtube_improved.py <youtube_url> --oauth")
+        print("\nПримеры:")
+        print("  python youtube_improved.py https://youtu.be/VIDEO_ID")
+        print("  python youtube_improved.py https://youtu.be/VIDEO_ID --oauth")
         sys.exit(1)
     
     url = sys.argv[1]
+    use_oauth = "--oauth" in sys.argv
+    
     api_key = os.getenv("OPENAI_API_KEY")
     
     if not api_key:
@@ -144,24 +186,28 @@ def main():
         print(f"ID видео: {video_id}")
         
         # Получаем транскрипт
-        transcript = get_youtube_transcript(video_id)
+        transcript, video_title = get_transcript_with_pytubefix(url, use_oauth)
         
         if not transcript:
             print("Не удалось получить транскрипт. Завершение работы.")
+            print("\nВозможные решения:")
+            print("1. Попробуйте с флагом --oauth для аутентификации")
+            print("2. Убедитесь, что у видео есть субтитры")
+            print("3. Попробуйте другое видео")
             sys.exit(1)
         
         print(f"Транскрипт получен. Длина: {len(transcript)} символов")
         
         # Анализируем транскрипт
         print("Анализ транскрипта с помощью OpenAI...")
-        analysis = analyze_with_openai(transcript, api_key)
+        analysis = analyze_with_openai(transcript, api_key, video_title)
         
         if not analysis:
             print("Не удалось выполнить анализ транскрипта.")
             sys.exit(1)
         
         # Сохраняем результаты
-        transcript_file, json_file = save_results(video_id, transcript, analysis)
+        transcript_file, json_file = save_results(video_id, video_title, transcript, analysis)
         
         print("Готово!")
         print(f"Транскрипт и анализ: {transcript_file}")
