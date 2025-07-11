@@ -342,42 +342,219 @@ class ChronologicalTranscriptProcessor:
             )
             timeline.append(topic_event)
     
+    def extract_terminology_from_screenshots(self, screenshot_events: List[TimelineEvent]) -> Dict:
+        """АГЕНТ извлекает терминологию из скриншотов для коррекции Whisper"""
+        
+        logger.info("🤖 АГЕНТ анализирует скриншоты для извлечения терминологии...")
+        
+        terminology_dict = {'by_timestamp': {}, 'all_terms': set()}
+        
+        for event in screenshot_events:
+            detailed_content = event.content.get('detailed_content', {})
+            if not detailed_content:
+                continue
+            
+            timestamp = event.timestamp
+            
+            # АГЕНТ анализирует содержимое каждого скриншота
+            prompt = f"""Ты - эксперт по извлечению терминологии из деловых документов. Проанализируй содержимое скриншота и извлеки ВСЮ точную терминологию.
+
+СОДЕРЖИМОЕ СКРИНШОТА:
+Тип контента: {detailed_content.get('main_content_type', 'неизвестно')}
+Видимый текст: {detailed_content.get('visible_text', '')}
+Код/команды: {detailed_content.get('code_snippets', [])}
+Данные таблиц: {detailed_content.get('table_data', [])}
+UI элементы: {detailed_content.get('ui_elements', [])}
+Технические детали: {detailed_content.get('technical_details', [])}
+
+ТВОЯ ЗАДАЧА:
+Извлеки ВСЕ термины, которые могут быть неправильно распознаны Whisper:
+- Названия полей, таблиц, переменных
+- Имена файлов, функций, методов
+- Технические термины и аббревиатуры
+- Точные числовые значения и даты
+- UI элементы (кнопки, поля)
+- Специфические названия проектов/систем
+
+ВАЖНО: Учитывай, что Whisper часто:
+- Переводит английские термины на русский
+- Искажает техническую терминологию
+- Неправильно распознает числа и даты
+- Путает похожие по звучанию слова
+
+Верни JSON с терминами, которые важно исправить в речи:
+{{
+    "critical_terms": ["список самых важных терминов"],
+    "field_names": ["названия полей/переменных"],
+    "exact_values": ["точные значения, числа, даты"],
+    "file_names": ["имена файлов"],
+    "ui_elements": ["элементы интерфейса"],
+    "whisper_errors": [
+        {{
+            "correct": "правильный термин",
+            "likely_errors": ["возможные ошибки Whisper"]
+        }}
+    ]
+}}"""
+
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=0.1
+                )
+                
+                result = json.loads(response.choices[0].message.content)
+                
+                # Сохраняем по времени
+                terminology_dict['by_timestamp'][timestamp] = result
+                
+                # Добавляем в общий словарь
+                for category, terms in result.items():
+                    if category != 'whisper_errors' and isinstance(terms, list):
+                        terminology_dict['all_terms'].update(terms)
+                
+                logger.info(f"✅ Извлечено {len(result.get('critical_terms', []))} критических терминов в {timestamp:.1f}с")
+                
+            except Exception as e:
+                logger.error(f"Ошибка при анализе терминологии: {e}")
+        
+        total_terms = len(terminology_dict['all_terms'])
+        logger.info(f"🎯 АГЕНТ извлек {total_terms} уникальных терминов из {len(screenshot_events)} скриншотов")
+        
+        return terminology_dict
+    
+
+    
+    def correct_whisper_with_terminology(self, text: str, terminology_dict: Dict, 
+                                       timestamp: float) -> str:
+        """АГЕНТ корректирует ошибки Whisper используя терминологию из скриншотов"""
+        
+        if not text or not terminology_dict:
+            return text
+            
+        # Получаем релевантные термины для этого времени (±30 секунд)
+        relevant_terminology = []
+        for ts, terms_data in terminology_dict.get('by_timestamp', {}).items():
+            if abs(ts - timestamp) <= 30:  # В пределах 30 секунд
+                relevant_terminology.append({
+                    'timestamp': ts,
+                    'terms': terms_data
+                })
+        
+        if not relevant_terminology:
+            return text
+        
+        # АГЕНТ корректирует текст
+        prompt = f"""Ты - эксперт по исправлению ошибок распознавания речи Whisper. У тебя есть ТОЧНАЯ терминология из скриншотов.
+
+ИСХОДНЫЙ ТЕКСТ (с ошибками Whisper):
+"{text}"
+
+ТОЧНАЯ ТЕРМИНОЛОГИЯ ИЗ СКРИНШОТОВ:
+{json.dumps(relevant_terminology, ensure_ascii=False, indent=2)}
+
+ТВОЯ ЗАДАЧА:
+Исправь ошибки Whisper, используя ТОЧНУЮ терминологию со скриншотов:
+
+1. 🔍 Найди искаженные термины в тексте
+2. ✏️  Замени их на ТОЧНЫЕ версии из скриншотов  
+3. 📝 Исправь только явные ошибки, не меняй смысл
+4. 🎯 Приоритет - названия полей, файлов, техническим терминам
+
+ТИПИЧНЫЕ ОШИБКИ WHISPER:
+- "дата басе" → "database"  
+- "файл таблицы" → название конкретной таблицы
+- "кнопка сохранить" → точное название кнопки
+- числа словами → цифры
+
+Верни JSON:
+{{
+    "corrected_text": "исправленный текст",
+    "corrections": [
+        {{
+            "original": "ошибочный фрагмент",
+            "corrected": "правильный термин",
+            "source": "откуда взят правильный термин"
+        }}
+    ]
+}}
+
+ВАЖНО: Исправляй только то, что есть в терминологии!"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.1
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            corrected_text = result.get('corrected_text', text)
+            corrections = result.get('corrections', [])
+            
+            if corrections:
+                logger.info(f"🤖 АГЕНТ исправил {len(corrections)} ошибок Whisper в {timestamp:.1f}с")
+                for correction in corrections[:3]:  # Показываем первые 3
+                    logger.info(f"   ✏️  '{correction['original']}' → '{correction['corrected']}'")
+            
+            return corrected_text
+            
+        except Exception as e:
+            logger.error(f"Ошибка при коррекции АГЕНТОМ: {e}")
+            return text
+    
+
+    
     def correct_transcript_with_context(self, timeline: List[TimelineEvent],
                                       speakers: Dict[str, Speaker],
                                       video_context: Dict) -> List[TimelineEvent]:
-        """Корректирует транскрипт с учетом контекста и скриншотов"""
+        """Корректирует транскрипт с учетом ПОЛНОГО контекста + терминология из скриншотов"""
         
-        logger.info("Корректируем транскрипт с учетом контекста...")
+        logger.info("🔧 Улучшенная коррекция с терминологией из скриншотов...")
         
-        # Группируем события для пакетной обработки
-        processing_groups = self.create_processing_groups(timeline)
+        # Собираем события по типам
+        transcript_events = [e for e in timeline if e.type == 'transcript']
+        screenshot_events = [e for e in timeline if e.type == 'screenshot']
         
-        corrected_timeline = []
+        if not transcript_events:
+            return timeline
         
-        for group in processing_groups:
-            # Находим скриншоты в группе
-            screenshots_in_group = [e for e in group if e.type == 'screenshot']
-            transcript_in_group = [e for e in group if e.type == 'transcript']
-            
-            if not transcript_in_group:
-                corrected_timeline.extend(group)
-                continue
-            
-            # Корректируем транскрипты в группе
-            corrected_events = self.correct_transcript_group(
-                transcript_in_group, screenshots_in_group, speakers, video_context
+        # 1. НОВОЕ: Дополняем скриншоты детальным анализом содержимого
+        enhanced_screenshots = self.enhance_screenshots_with_content(screenshot_events)
+        
+        # 2. НОВОЕ: Извлекаем терминологию из скриншотов
+        terminology_dict = self.extract_terminology_from_screenshots(enhanced_screenshots)
+        
+        # 3. НОВОЕ: Предварительно корректируем Whisper ошибки с помощью терминологии
+        for event in transcript_events:
+            original_text = event.content['text']
+            corrected_text = self.correct_whisper_with_terminology(
+                original_text, terminology_dict, event.timestamp
             )
-            
-            # Объединяем с остальными событиями
-            for event in group:
-                if event.type == 'transcript':
-                    # Находим откорректированную версию
-                    for corrected in corrected_events:
-                        if corrected.timestamp == event.timestamp:
-                            corrected_timeline.append(corrected)
-                            break
-                else:
-                    corrected_timeline.append(event)
+            event.content['text'] = corrected_text
+            event.content['whisper_corrections'] = corrected_text != original_text
+        
+        # 4. Основная коррекция с контекстными блоками
+        corrected_events = self.correct_with_context_blocks(
+            transcript_events, enhanced_screenshots, speakers, video_context, terminology_dict
+        )
+        
+        # Создаем новый timeline с откорректированными событиями
+        corrected_timeline = []
+        transcript_map = {e.timestamp: e for e in corrected_events}
+        
+        for event in timeline:
+            if event.type == 'transcript' and event.timestamp in transcript_map:
+                corrected_timeline.append(transcript_map[event.timestamp])
+            elif event.type == 'screenshot':
+                # Используем улучшенные скриншоты
+                enhanced_event = next((e for e in enhanced_screenshots if e.timestamp == event.timestamp), event)
+                corrected_timeline.append(enhanced_event)
+            else:
+                corrected_timeline.append(event)
         
         # Сортируем по времени
         corrected_timeline.sort(key=lambda x: x.timestamp)
@@ -407,6 +584,295 @@ class ChronologicalTranscriptProcessor:
             groups.append(current_group)
         
         return groups
+    
+    def correct_whole_transcript(self, transcript_events: List[TimelineEvent],
+                               screenshot_events: List[TimelineEvent],
+                               speakers: Dict[str, Speaker],
+                               video_context: Dict) -> List[TimelineEvent]:
+        """Корректирует ВЕСЬ транскрипт целиком с полным контекстом"""
+        
+        logger.info("🔧 Улучшенная коррекция с сохранением деталей...")
+        
+        # Собираем ПОЛНЫЙ диалог по времени
+        full_dialogue = []
+        speaker_profiles = {}
+        
+        for event in transcript_events:
+            speaker_id = event.content.get('speaker_id', 'unknown')
+            speaker_name = speakers.get(speaker_id, Speaker(id=speaker_id)).name or f"Участник {speaker_id[-1] if speaker_id != 'unknown' else '1'}"
+            
+            # Строим профили спикеров
+            if speaker_name not in speaker_profiles:
+                speaker_profiles[speaker_name] = {
+                    'total_speech': [],
+                    'topics': set(),
+                    'style': 'формальный'
+                }
+            
+            text = event.content['text']
+            speaker_profiles[speaker_name]['total_speech'].append(text)
+            
+            full_dialogue.append({
+                'time': event.timestamp,
+                'speaker': speaker_name,
+                'text': text,
+                'original_event': event
+            })
+        
+        # Собираем информацию о скриншотах
+        visual_context = ""
+        if screenshot_events:
+            visual_context = "\n\nВизуальная информация в видео:\n"
+            for ss_event in screenshot_events:
+                time_str = f"{int(ss_event.timestamp//60)}:{int(ss_event.timestamp%60):02d}"
+                desc = ss_event.content.get('description', '')
+                reason = ss_event.content.get('reason', 'изменение')
+                visual_context += f"[{time_str}] {reason}: {desc}\n"
+        
+        # 🚀 НОВЫЙ ПОДХОД: разбиваем на перекрывающиеся блоки
+        corrected_events = self.correct_with_context_blocks(
+            full_dialogue, speaker_profiles, visual_context, video_context
+        )
+        
+        logger.info(f"✅ Откорректировано {len(corrected_events)} реплик с сохранением деталей")
+        return corrected_events
+    
+    def correct_with_context_blocks(self, transcript_events: List[TimelineEvent], 
+                                   enhanced_screenshots: List[TimelineEvent],
+                                   speakers: Dict[str, Speaker],
+                                   video_context: Dict, terminology_dict: Dict) -> List[TimelineEvent]:
+        """Новый метод коррекции с контекстными блоками + терминология из скриншотов"""
+        
+        # Преобразуем события в диалог для обработки
+        full_dialogue = []
+        speaker_profiles = {}
+        
+        for event in transcript_events:
+            speaker_id = event.content.get('speaker_id', 'unknown')
+            speaker_name = speakers.get(speaker_id, Speaker(id=speaker_id)).name or f"Участник {speaker_id[-1] if speaker_id != 'unknown' else '1'}"
+            
+            # Строим профили спикеров
+            if speaker_name not in speaker_profiles:
+                speaker_profiles[speaker_name] = {
+                    'total_speech': [],
+                    'topics': set(),
+                    'style': 'формальный'
+                }
+            
+            text = event.content['text']
+            speaker_profiles[speaker_name]['total_speech'].append(text)
+            
+            full_dialogue.append({
+                'time': event.timestamp,
+                'speaker': speaker_name,
+                'text': text,
+                'original_event': event
+            })
+        
+        # Определяем размер блока (примерно 15-20 реплик)
+        block_size = 20
+        overlap_size = 5  # Перекрытие для сохранения контекста
+        
+        corrected_events = []
+        
+        for block_start in range(0, len(full_dialogue), block_size - overlap_size):
+            block_end = min(block_start + block_size, len(full_dialogue))
+            
+            # Текущий блок
+            current_block = full_dialogue[block_start:block_end]
+            
+            # Контекст до блока (предыдущие 3 реплики)
+            context_before = full_dialogue[max(0, block_start-3):block_start]
+            
+            # Контекст после блока (следующие 3 реплики) 
+            context_after = full_dialogue[block_end:min(len(full_dialogue), block_end+3)]
+            
+            # Определяем тематический контекст блока
+            block_theme = self.analyze_block_theme(current_block)
+            
+            # Определяем временной диапазон блока
+            block_start_time = current_block[0]['time'] if current_block else 0
+            block_end_time = current_block[-1]['time'] if current_block else 0
+            
+            logger.info(f"🔍 Обрабатываем блок {block_start//block_size + 1}: реплики {block_start+1}-{block_end} (тема: {block_theme})")
+            
+            # Получаем детальное содержимое скриншотов для этого блока
+            visual_context = self.get_screenshot_content_for_time(
+                enhanced_screenshots, (block_start_time + block_end_time) / 2, window=60
+            )
+            
+            # Корректируем блок с полным контекстом + терминология
+            corrected_block = self.correct_context_block(
+                current_block, context_before, context_after,
+                block_theme, speaker_profiles, visual_context, video_context, terminology_dict
+            )
+            
+            # Добавляем откорректированные события (избегаем дубликатов при перекрытии)
+            start_idx = overlap_size if block_start > 0 else 0
+            for i in range(start_idx, len(corrected_block)):
+                corrected_events.append(corrected_block[i])
+        
+        return corrected_events
+    
+    def analyze_block_theme(self, block: List[Dict]) -> str:
+        """Анализирует тематику блока диалога"""
+        
+        block_text = ' '.join([item['text'] for item in block]).lower()
+        
+        # Простая эвристика для определения темы
+        themes = {
+            'техническое обсуждение': ['оборудование', 'система', 'данные', 'база', 'таблица', 'схема'],
+            'планирование': ['план', 'задача', 'сроки', 'дедлайн', 'график'],
+            'анализ проблем': ['проблема', 'ошибка', 'исправить', 'решение', 'баг'],
+            'демонстрация': ['показать', 'смотреть', 'экран', 'слайд', 'код'],
+            'обсуждение процессов': ['процесс', 'этап', 'шаг', 'порядок', 'последовательность']
+        }
+        
+        best_theme = 'общее обсуждение'
+        max_score = 0
+        
+        for theme, keywords in themes.items():
+            score = sum(1 for keyword in keywords if keyword in block_text)
+            if score > max_score:
+                max_score = score
+                best_theme = theme
+        
+        return best_theme
+    
+    def correct_context_block(self, current_block: List[Dict],
+                             context_before: List[Dict], context_after: List[Dict],
+                             block_theme: str, speaker_profiles: Dict,
+                             visual_context: str, video_context: Dict,
+                             terminology_dict: Dict) -> List[TimelineEvent]:
+        """Корректирует блок с учетом полного контекста"""
+        
+        # Формируем контекстную информацию
+        context_info = ""
+        if context_before:
+            context_info += "ПРЕДШЕСТВУЮЩИЙ КОНТЕКСТ:\n"
+            for item in context_before:
+                time_str = f"{int(item['time']//60)}:{int(item['time']%60):02d}"
+                context_info += f"[{time_str}] {item['speaker']}: {item['text']}\n"
+            context_info += "\n"
+        
+        # Текущий блок
+        current_text = ""
+        for item in current_block:
+            time_str = f"{int(item['time']//60)}:{int(item['time']%60):02d}"
+            current_text += f"[{time_str}] {item['speaker']}: {item['text']}\n"
+        
+        # Последующий контекст
+        if context_after:
+            context_info += "\nПОСЛЕДУЮЩИЙ КОНТЕКСТ:\n"
+            for item in context_after:
+                time_str = f"{int(item['time']//60)}:{int(item['time']%60):02d}"
+                context_info += f"[{time_str}] {item['speaker']}: {item['text']}\n"
+        
+        # 🤖 АГЕНТНЫЙ ПРОМПТ с использованием терминологии из скриншотов
+        prompt = f"""Ты - эксперт по восстановлению точного смысла деловых встреч. У тебя есть ДЕТАЛЬНАЯ информация с экрана + точная терминология.
+
+КОНТЕКСТ ВСТРЕЧИ:
+- Тип: {video_context.get('meeting_type', 'деловая встреча')}
+- Тематика блока: {block_theme}
+- Участники: {', '.join(speaker_profiles.keys())}
+
+{context_info}
+
+ОСНОВНОЙ БЛОК ДЛЯ КОРРЕКЦИИ:
+{current_text}
+
+ДЕТАЛЬНАЯ ИНФОРМАЦИЯ С ЭКРАНА:
+{visual_context}
+
+ИЗВЛЕЧЕННАЯ ТЕРМИНОЛОГИЯ ИЗ СКРИНШОТОВ:
+{json.dumps(terminology_dict, default=lambda x: list(x) if isinstance(x, set) else x, ensure_ascii=False, indent=2)[:2000]}
+
+ТВОЯ ГЛАВНАЯ ЗАДАЧА:
+🎯 Восстанови ТОЧНЫЙ смысл диалога, используя:
+1. Детальное содержимое скриншотов (что реально видно на экране)
+2. Точную терминологию (правильные названия полей, файлов, систем)
+3. Техническую информацию (коды, данные, команды)
+4. Контекст разговора (что было до и после)
+
+ОСОБОЕ ВНИМАНИЕ:
+💡 Если участник говорит общие фразы типа "вот здесь", "это поле", "эта таблица" - 
+   замени на КОНКРЕТНЫЕ названия из скриншотов!
+
+🔍 Если Whisper исказил технические термины - исправь по терминологии!
+
+📊 Если упоминаются данные/числа - используй точные значения с экрана!
+
+ПРИМЕРЫ УЛУЧШЕНИЙ:
+❌ "Там разобрали собрали снова протестировали" 
+✅ "Оборудование model_X123 разобрали, протестировали систему inventory_tracking, выявили ошибки в поле date_received, затем собрали и отправили"
+
+❌ "Здесь соответственно следующая строчка по оборудованию"
+✅ "В таблице equipment_log следующая запись показывает статус 'completed' для единицы с ID 15847"
+
+Верни JSON с МАКСИМАЛЬНО ДЕТАЛЬНЫМИ репликами:
+{{
+    "corrected_dialogue": [
+        {{
+            "timestamp": временная_метка,
+            "speaker": "имя_спикера",
+            "corrected_text": "МАКСИМАЛЬНО ДЕТАЛЬНАЯ реплика с конкретными названиями, числами, терминами",
+            "screen_references": "что конкретно видно на экране в этот момент",
+            "technical_details": "извлеченные технические детали",
+            "context_connection": "связь с общим контекстом"
+        }}
+    ],
+    "block_summary": "подробное резюме технических аспектов блока"
+}}"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o",  # Используем мощную модель
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.05,  # Минимальная креативность для точности
+                max_tokens=6000    # Увеличили лимит для деталей
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            corrected_dialogue = result.get('corrected_dialogue', [])
+            block_summary = result.get('block_summary', '')
+            
+            # Создаем откорректированные события
+            corrected_events = []
+            for i, original_item in enumerate(current_block):
+                if i < len(corrected_dialogue):
+                    corrected = corrected_dialogue[i]
+                    
+                    original_event = original_item['original_event']
+                    
+                    # Создаем новый event с детальной информацией
+                    new_event = TimelineEvent(
+                        timestamp=original_event.timestamp,
+                        type='transcript',
+                        content={
+                            'text': original_event.content['text'],  # Оригинал
+                            'corrected_text': corrected.get('corrected_text', original_event.content['text']),
+                            'speaker_id': original_event.content.get('speaker_id'),
+                            'speaker_name': corrected.get('speaker'),
+                            'technical_details': corrected.get('technical_details', ''),
+                            'context_connection': corrected.get('context_connection', ''),
+                            'duration': original_event.content.get('duration', 0),
+                            'block_summary': block_summary if i == 0 else None,
+                            'theme': block_theme
+                        },
+                        importance=original_event.importance
+                    )
+                    corrected_events.append(new_event)
+                else:
+                    # Если не хватило откорректированных - берем оригинал
+                    corrected_events.append(original_item['original_event'])
+            
+            return corrected_events
+            
+        except Exception as e:
+            logger.error(f"Ошибка при коррекции блока: {e}")
+            # Возвращаем исходные события в случае ошибки
+            return [item['original_event'] for item in current_block]
     
     def correct_transcript_group(self, transcript_events: List[TimelineEvent],
                                screenshot_events: List[TimelineEvent],
@@ -649,22 +1115,69 @@ class ChronologicalTranscriptProcessor:
             end_time = self.format_time(section['end_time'])
             report.append(f"\n### {section['topic']} ({start_time} - {end_time})\n")
             
+            # Добавляем тематический контекст блоков в секции
+            block_themes = set()
+            for event in section['events']:
+                if event.type == 'transcript':
+                    theme = event.content.get('theme')
+                    if theme and theme != 'общее обсуждение':
+                        block_themes.add(theme)
+            
+            if block_themes:
+                report.append(f"🎯 **Тематика:** {', '.join(block_themes)}\n")
+            
+            # Собираем резюме блоков в секции
+            block_summaries = []
+            for event in section['events']:
+                if event.type == 'transcript':
+                    block_summary = event.content.get('block_summary')
+                    if block_summary and block_summary not in block_summaries:
+                        block_summaries.append(block_summary)
+            
+            if block_summaries:
+                report.append("📋 **Технические аспекты:**")
+                for summary in block_summaries:
+                    report.append(f"  • {summary}")
+                report.append("")
+            
             # События в секции
             for event in section['events']:
                 if event.type == 'transcript':
-                    # Транскрипт
+                    # Транскрипт - ТОЛЬКО исправленная версия
                     time = self.format_time(event.timestamp)
                     speaker_id = event.content.get('speaker_id', 'unknown')
                     speaker_name = event.content.get('speaker_name') or \
                                  speakers.get(speaker_id, Speaker(id=speaker_id)).name or \
-                                 f"Участник {speaker_id[-1]}"
+                                 f"Спикер {speaker_id[-1] if speaker_id != 'unknown' else '1'}"
                     
-                    text = event.content.get('corrected_text', event.content.get('text', ''))
+                    # Используем ТОЛЬКО откорректированный текст
+                    corrected_text = event.content.get('corrected_text')
+                    if corrected_text and corrected_text.strip():
+                        report.append(f"**[{time}] {speaker_name}:** {corrected_text}")
+                    else:
+                        # Fallback на оригинал только если нет исправленного
+                        original_text = event.content.get('text', '').strip()
+                        if original_text:
+                            report.append(f"**[{time}] {speaker_name}:** {original_text}")
+                    
+                    # Добавляем НОВЫЕ поля от агента
+                    screen_references = event.content.get('screen_references', '')
+                    if screen_references and screen_references.strip():
+                        report.append(f"  📺 **На экране:** {screen_references}")
+                    
+                    technical_details = event.content.get('technical_details', '')
+                    if technical_details and technical_details.strip():
+                        report.append(f"  ⚙️ **Технические детали:** {technical_details}")
+                    
+                    context_connection = event.content.get('context_connection', '')
+                    if context_connection and context_connection.strip():
+                        report.append(f"  🔗 **Контекстная связь:** {context_connection}")
+                    
+                    # Старые контекстные пояснения (для совместимости)
                     context_note = event.content.get('context_explanation')
+                    if context_note and context_note.strip():
+                        report.append(f"  📝 **Контекст:** {context_note}")
                     
-                    report.append(f"**[{time}] {speaker_name}:** {text}")
-                    if context_note:
-                        report.append(f"*[{context_note}]*")
                     report.append("")
                     
                 elif event.type == 'screenshot':
@@ -698,6 +1211,145 @@ class ChronologicalTranscriptProcessor:
         minutes = int(seconds // 60)
         secs = int(seconds % 60)
         return f"{minutes:02d}:{secs:02d}"
+
+    def analyze_screenshot_content(self, screenshot_path: str, timestamp: float) -> Dict:
+        """Детально анализирует содержимое скриншота"""
+        
+        try:
+            # Кодируем изображение в base64
+            with open(screenshot_path, "rb") as image_file:
+                base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+            
+            # Промпт для детального извлечения
+            prompt = """Детально проанализируй содержимое этого скриншота из деловой встречи.
+
+ИЗВЛЕКИ ВСЁ:
+1. **Текст на экране** - ТОЧНО скопируй весь видимый текст
+2. **Коды/команды** - если есть программный код, SQL, команды - скопируй точно
+3. **Данные из таблиц** - числа, даты, статусы, значения
+4. **Схемы/диаграммы** - опиши структуру и элементы
+5. **UI элементы** - кнопки, поля, меню с их названиями
+6. **Технические детали** - версии, параметры, настройки
+
+Верни подробную информацию в JSON:
+{
+    "visible_text": "весь видимый текст дословно",
+    "code_snippets": ["фрагменты кода/команд если есть"],
+    "table_data": ["данные из таблиц/списков"],
+    "technical_details": ["версии, параметры, технические значения"],
+    "ui_elements": ["названия кнопок, полей, меню"],
+    "diagrams_schemas": "описание схем/диаграмм",
+    "main_content_type": "тип содержимого (код/документ/таблица/диаграмма/презентация)",
+    "key_information": "самая важная информация с экрана"
+}
+
+КРИТИЧЕСКИ ВАЖНО: Копируй текст и данные ТОЧНО, не обобщай!"""
+
+            response = self.client.chat.completions.create(
+                model="gpt-4o",  # Используем мощную модель для анализа изображений
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                            },
+                        },
+                    ],
+                }],
+                response_format={"type": "json_object"},
+                max_tokens=2000
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            logger.info(f"✅ Детально проанализирован скриншот в {timestamp:.1f}с")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Ошибка при анализе содержимого скриншота: {e}")
+            return {}
+    
+    def enhance_screenshots_with_content(self, screenshot_events: List[TimelineEvent]) -> List[TimelineEvent]:
+        """Дополняет скриншоты детальным анализом содержимого"""
+        
+        enhanced_events = []
+        
+        for event in screenshot_events:
+            screenshot_path = event.content.get('path', '')
+            
+            if screenshot_path and os.path.exists(screenshot_path):
+                # Анализируем содержимое скриншота
+                detailed_content = self.analyze_screenshot_content(
+                    screenshot_path, event.timestamp
+                )
+                
+                # Создаем улучшенное событие
+                enhanced_content = event.content.copy()
+                enhanced_content['detailed_content'] = detailed_content
+                
+                enhanced_event = TimelineEvent(
+                    timestamp=event.timestamp,
+                    type=event.type,
+                    content=enhanced_content,
+                    importance=event.importance
+                )
+                enhanced_events.append(enhanced_event)
+            else:
+                enhanced_events.append(event)
+        
+        return enhanced_events
+    
+    def get_screenshot_content_for_time(self, screenshot_events: List[TimelineEvent], 
+                                      target_time: float, window: float = 30) -> str:
+        """Получает детальное содержимое скриншотов для определенного времени"""
+        
+        relevant_screenshots = []
+        
+        for event in screenshot_events:
+            if abs(event.timestamp - target_time) <= window:
+                detailed = event.content.get('detailed_content', {})
+                
+                if detailed:
+                    time_str = f"{int(event.timestamp//60)}:{int(event.timestamp%60):02d}"
+                    content_info = f"\n📸 СКРИНШОТ в {time_str}:\n"
+                    
+                    # Основной тип контента
+                    content_type = detailed.get('main_content_type', 'неизвестно')
+                    content_info += f"   Тип: {content_type}\n"
+                    
+                    # Видимый текст
+                    visible_text = detailed.get('visible_text', '')
+                    if visible_text and visible_text.strip():
+                        content_info += f"   📄 Текст на экране: {visible_text[:200]}...\n"
+                    
+                    # Код/команды
+                    code_snippets = detailed.get('code_snippets', [])
+                    if code_snippets:
+                        content_info += f"   💻 Код/команды: {'; '.join(code_snippets[:3])}\n"
+                    
+                    # Данные таблиц
+                    table_data = detailed.get('table_data', [])
+                    if table_data:
+                        content_info += f"   📊 Данные таблиц: {'; '.join(table_data[:3])}\n"
+                    
+                    # Технические детали
+                    tech_details = detailed.get('technical_details', [])
+                    if tech_details:
+                        content_info += f"   ⚙️ Технические детали: {'; '.join(tech_details[:3])}\n"
+                    
+                    # Ключевая информация
+                    key_info = detailed.get('key_information', '')
+                    if key_info and key_info.strip():
+                        content_info += f"   🎯 Ключевая информация: {key_info}\n"
+                    
+                    relevant_screenshots.append(content_info)
+        
+        if relevant_screenshots:
+            return "\n".join(relevant_screenshots)
+        else:
+            return ""
 
 def integrate_chronological_processor(transcript_segments: List[Dict],
                                     screenshots: List[Tuple],

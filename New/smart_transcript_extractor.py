@@ -96,12 +96,30 @@ class SmartTranscriptExtractor:
     def analyze_transcript_for_moments(self, transcript_segments: List[Dict]) -> List[TranscriptMoment]:
         """Анализирует транскрипт и находит ключевые моменты"""
         
-        # Группируем транскрипт по блокам (30-60 секунд)
-        text_blocks = self.group_transcript_blocks(transcript_segments, block_size=45)
+        # Сначала пробуем проанализировать весь транскрипт одним запросом
+        full_text = self.prepare_full_transcript_text(transcript_segments)
+        
+        # Если транскрипт слишком большой (>15000 символов), разбиваем на крупные блоки
+        if len(full_text) > 15000:
+            logger.info(f"📄 Транскрипт большой ({len(full_text)} символов), разбиваем на блоки по 10 минут")
+            text_blocks = self.group_transcript_blocks(transcript_segments, block_size=600)  # 10 минут
+        else:
+            logger.info(f"📄 Анализируем весь транскрипт целиком ({len(full_text)} символов)")
+            # Создаем один блок из всего транскрипта
+            text_blocks = [{
+                'start_time': transcript_segments[0]['start'] if transcript_segments else 0,
+                'end_time': transcript_segments[-1]['start'] + transcript_segments[-1]['duration'] if transcript_segments else 0,
+                'text': full_text,
+                'segments': transcript_segments
+            }]
         
         all_moments = []
         
-        for block in text_blocks:
+        logger.info(f"🧠 Обрабатываем {len(text_blocks)} блок(ов) через OpenAI API...")
+        
+        for i, block in enumerate(text_blocks, 1):
+            logger.info(f"📝 Анализ блока {i}/{len(text_blocks)} ({block['start_time']:.1f}с - {block['end_time']:.1f}с)")
+            
             # Анализируем каждый блок с помощью AI
             moments = self.analyze_text_block(block)
             all_moments.extend(moments)
@@ -110,7 +128,18 @@ class SmartTranscriptExtractor:
             heuristic_moments = self.find_heuristic_moments(block)
             all_moments.extend(heuristic_moments)
         
+        logger.info(f"✅ Анализ завершен. Найдено {len(all_moments)} потенциальных моментов")
         return all_moments
+
+    def prepare_full_transcript_text(self, transcript_segments: List[Dict]) -> str:
+        """Подготавливает полный текст транскрипта с таймкодами"""
+        text_parts = []
+        
+        for segment in transcript_segments:
+            timestamp = f"[{segment['start']:.1f}с]"
+            text_parts.append(f"{timestamp} {segment['text']}")
+        
+        return '\n'.join(text_parts)
     
     def group_transcript_blocks(self, transcript_segments: List[Dict], 
                                block_size: float = 45) -> List[Dict]:
