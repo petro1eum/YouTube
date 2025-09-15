@@ -19,6 +19,48 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def safe_json_parse(response_content: str, context: str = "OpenAI response") -> Dict:
+    """Безопасный парсинг JSON с обработкой ошибок"""
+    try:
+        return json.loads(response_content)
+    except json.JSONDecodeError as json_error:
+        logger.warning(f"Ошибка JSON парсинга в {context}: {json_error}")
+        logger.debug(f"Сырой ответ: {response_content[:300]}...")
+        
+        # Пробуем исправить JSON
+        try:
+            # Убираем возможные markdown блоки
+            cleaned_content = response_content.replace('```json', '').replace('```', '').strip()
+            
+            # Пробуем найти JSON в тексте
+            start_idx = cleaned_content.find('{')
+            end_idx = cleaned_content.rfind('}') + 1
+            
+            if start_idx >= 0 and end_idx > start_idx:
+                json_part = cleaned_content[start_idx:end_idx]
+                result = json.loads(json_part)
+                logger.info(f"✅ JSON исправлен в {context}")
+                return result
+            else:
+                # Пробуем найти массив
+                start_idx = cleaned_content.find('[')
+                end_idx = cleaned_content.rfind(']') + 1
+                
+                if start_idx >= 0 and end_idx > start_idx:
+                    json_part = cleaned_content[start_idx:end_idx]
+                    result = json.loads(json_part)
+                    logger.info(f"✅ JSON массив исправлен в {context}")
+                    return result
+                else:
+                    raise ValueError("JSON структура не найдена")
+                    
+        except Exception as fix_error:
+            logger.error(f"Не удалось исправить JSON в {context}: {fix_error}")
+            return {}
+    except Exception as e:
+        logger.error(f"Общая ошибка при парсинге JSON в {context}: {e}")
+        return {}
+
 @dataclass
 class Speaker:
     """Информация об участнике"""
@@ -137,7 +179,7 @@ class ChronologicalTranscriptProcessor:
                 temperature=0.3
             )
             
-            result = json.loads(response.choices[0].message.content)
+            result = safe_json_parse(response.choices[0].message.content, "identify_speakers")
             
             # Создаем объекты Speaker
             speakers = {}
@@ -405,7 +447,7 @@ UI элементы: {detailed_content.get('ui_elements', [])}
                     temperature=0.1
                 )
                 
-                result = json.loads(response.choices[0].message.content)
+                result = safe_json_parse(response.choices[0].message.content, "extract_terminology")
                 
                 # Сохраняем по времени
                 terminology_dict['by_timestamp'][timestamp] = result
@@ -491,7 +533,7 @@ UI элементы: {detailed_content.get('ui_elements', [])}
                 temperature=0.1
             )
             
-            result = json.loads(response.choices[0].message.content)
+            result = safe_json_parse(response.choices[0].message.content, "correct_whisper")
             corrected_text = result.get('corrected_text', text)
             corrections = result.get('corrections', [])
             
@@ -1263,12 +1305,46 @@ UI элементы: {detailed_content.get('ui_elements', [])}
                 max_tokens=2000
             )
             
-            result = json.loads(response.choices[0].message.content)
-            logger.info(f"✅ Детально проанализирован скриншот в {timestamp:.1f}с")
-            return result
+            # Получаем ответ от модели
+            response_content = response.choices[0].message.content
+            
+            # Пробуем парсить JSON с обработкой ошибок
+            try:
+                result = json.loads(response_content)
+                logger.info(f"✅ Детально проанализирован скриншот в {timestamp:.1f}с")
+                return result
+            except json.JSONDecodeError as json_error:
+                logger.warning(f"Ошибка JSON парсинга в анализе скриншота: {json_error}")
+                logger.debug(f"Сырой ответ модели: {response_content[:500]}...")
+                
+                # Пробуем исправить JSON
+                try:
+                    # Убираем возможные markdown блоки
+                    cleaned_content = response_content.replace('```json', '').replace('```', '').strip()
+                    
+                    # Пробуем найти JSON в тексте
+                    start_idx = cleaned_content.find('{')
+                    end_idx = cleaned_content.rfind('}') + 1
+                    
+                    if start_idx >= 0 and end_idx > start_idx:
+                        json_part = cleaned_content[start_idx:end_idx]
+                        result = json.loads(json_part)
+                        logger.info(f"✅ JSON исправлен и скриншот проанализирован в {timestamp:.1f}с")
+                        return result
+                    else:
+                        raise ValueError("JSON блок не найден")
+                        
+                except Exception as fix_error:
+                    logger.error(f"Не удалось исправить JSON: {fix_error}")
+                    # Возвращаем базовый результат
+                    return {
+                        "visible_text": "Ошибка анализа",
+                        "main_content_type": "неизвестно",
+                        "key_information": "Не удалось проанализировать содержимое"
+                    }
             
         except Exception as e:
-            logger.error(f"Ошибка при анализе содержимого скриншота: {e}")
+            logger.error(f"Общая ошибка при анализе содержимого скриншота: {e}")
             return {}
     
     def enhance_screenshots_with_content(self, screenshot_events: List[TimelineEvent]) -> List[TimelineEvent]:
@@ -1321,28 +1397,51 @@ UI элементы: {detailed_content.get('ui_elements', [])}
                     
                     # Видимый текст
                     visible_text = detailed.get('visible_text', '')
-                    if visible_text and visible_text.strip():
-                        content_info += f"   📄 Текст на экране: {visible_text[:200]}...\n"
+                    # Безопасная обработка - может быть строкой или списком
+                    if visible_text:
+                        if isinstance(visible_text, list):
+                            visible_text_str = ' '.join(str(item) for item in visible_text if item)
+                        else:
+                            visible_text_str = str(visible_text)
+                        
+                        if visible_text_str.strip():
+                            content_info += f"   📄 Текст на экране: {visible_text_str[:200]}...\n"
                     
                     # Код/команды
                     code_snippets = detailed.get('code_snippets', [])
                     if code_snippets:
-                        content_info += f"   💻 Код/команды: {'; '.join(code_snippets[:3])}\n"
+                        # Безопасное преобразование в строки
+                        safe_snippets = [str(item) for item in code_snippets[:3] if item]
+                        if safe_snippets:
+                            content_info += f"   💻 Код/команды: {'; '.join(safe_snippets)}\n"
                     
                     # Данные таблиц
                     table_data = detailed.get('table_data', [])
                     if table_data:
-                        content_info += f"   📊 Данные таблиц: {'; '.join(table_data[:3])}\n"
+                        # Безопасное преобразование в строки
+                        safe_table_data = [str(item) for item in table_data[:3] if item]
+                        if safe_table_data:
+                            content_info += f"   📊 Данные таблиц: {'; '.join(safe_table_data)}\n"
                     
                     # Технические детали
                     tech_details = detailed.get('technical_details', [])
                     if tech_details:
-                        content_info += f"   ⚙️ Технические детали: {'; '.join(tech_details[:3])}\n"
+                        # Безопасное преобразование в строки
+                        safe_tech_details = [str(item) for item in tech_details[:3] if item]
+                        if safe_tech_details:
+                            content_info += f"   ⚙️ Технические детали: {'; '.join(safe_tech_details)}\n"
                     
                     # Ключевая информация
                     key_info = detailed.get('key_information', '')
-                    if key_info and key_info.strip():
-                        content_info += f"   🎯 Ключевая информация: {key_info}\n"
+                    # Безопасная обработка - может быть строкой или списком
+                    if key_info:
+                        if isinstance(key_info, list):
+                            key_info_str = ' '.join(str(item) for item in key_info if item)
+                        else:
+                            key_info_str = str(key_info)
+                        
+                        if key_info_str.strip():
+                            content_info += f"   🎯 Ключевая информация: {key_info_str}\n"
                     
                     relevant_screenshots.append(content_info)
         
