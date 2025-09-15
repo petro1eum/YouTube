@@ -104,3 +104,69 @@ private_key*
 public_key*
 ssh_keys/
 
+# 🎬 MEDIA FILES (HEAVY)
+# Video files
+*.mp4
+*.mkv
+*.webm
+*.avi
+*.mov
+*.wmv
+*.flv
+*.m4v
+
+# Audio files
+*.mp3
+*.wav
+*.aac
+*.flac
+*.ogg
+*.wma
+*.m4a
+
+# Image files (screenshots, etc.)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.webp
+
+# 📊 RESULTS & CACHE (HEAVY)
+# Analysis results
+*_analysis.json
+*_analysis.md
+*_metadata.json
+*_transcript*.txt
+*_transcript*.json
+*_transcript*.md
+*_integrated_data.json
+
+# Cache directories
+cache/
+*_cache/
+*.cache
+
+# Screenshots directories
+*_screenshots/
+screenshots/
+
+# Results directories (already covered but being explicit)
+results/
+*_results/
+optimized_results/
+mlx_results/
+
+# Temporary processing files
+temp/
+tmp/
+*_temp/
+*_tmp/
+
+# Large data files
+*.json.bak
+*.json.backup
+large_data/
+data_dump/
+
