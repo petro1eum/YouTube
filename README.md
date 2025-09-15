@@ -1,183 +1,176 @@
-# YouTube Code and Content Extractor
+# 🎬 YouTube Video Analysis & Meeting Transcript System
 
-This project consists of Python scripts for extracting and analyzing content from YouTube videos, with a focus on recognizing code snippets in programming tutorials.
+Комплексная система для анализа видео с YouTube и локальных файлов, включая интеллектуальную обработку транскриптов встреч и извлечение кода из видео.
 
-## Features
+## 🚀 Основные возможности
 
-- Extract transcripts from YouTube videos
-- Download audio and video content from YouTube
-- Analyze video transcripts using OpenAI GPT models
-- Extract code snippets from video frames
-- Generate comprehensive analysis of video content
-- Save results in both Markdown and JSON formats
+### 📊 **Новая интегрированная система** (рекомендуется)
+- **Хронологический анализ встреч** с определением участников
+- **Умное извлечение скриншотов** на основе содержания
+- **Коррекция транскриптов** с учетом контекста
+- **Интеграция визуальных элементов** с речью
+- **Кэширование результатов** для быстрой повторной обработки
 
-## Requirements
+### 📹 **Классический анализ YouTube**
+- Извлечение транскриптов с YouTube
+- Загрузка аудио и видео контента
+- Анализ с помощью OpenAI GPT
+- Извлечение кода из кадров видео
+- Сохранение в Markdown и JSON форматах
 
-### Dependencies
+## 📁 Структура проекта
 
-- Python 3.8+
-- OpenAI API key (for GPT-based analysis)
-- Libraries listed in the scripts (see Installation)
+```
+YouTube/
+├── New/                          # 🆕 Новая интегрированная система
+│   ├── updated-video-analyzer.py # Главный скрипт для анализа
+│   ├── quick_analyze.py          # Быстрый анализ нескольких файлов
+│   ├── chronological_transcript_processor.py # Хронологический процессор
+│   ├── adaptive_screenshot_extractor.py      # Умные скриншоты
+│   ├── smart_transcript_extractor.py         # Умная обработка транскриптов
+│   ├── cache_manager.py          # Система кэширования
+│   └── README_INTEGRATED.md      # Подробная документация новой системы
+├── youtube.py                    # Классический анализ YouTube (устарел)
+├── get_transcript.py            # Простое извлечение транскриптов (устарел)
+├── download_youtube.sh          # Bash-скрипт для загрузки через yt-dlp
+└── README.md                    # Этот файл
+```
 
-### Optional
+## 🛠️ Установка
 
-- Tesseract OCR (for text recognition from images)
-- Whisper (for speech-to-text when YouTube transcripts aren't available)
-
-## Installation
-
-1. Clone the repository
-2. Create and activate a virtual environment:
+### 1. Клонирование и настройка окружения
 ```bash
+git clone https://github.com/petro1eum/YouTube.git
+cd YouTube
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 ```
-3. Install the required packages:
+
+### 2. Установка зависимостей
 ```bash
-pip install pytubefix whisper openai youtube-transcript-api python-dotenv opencv-python numpy pytesseract pillow requests
+pip install openai whisper opencv-python numpy pillow requests python-dotenv
+# Для работы с YouTube (если нужно):
+pip install pytubefix youtube-transcript-api
+# Для OCR (опционально):
+pip install pytesseract
 ```
-4. Create a `.env` file in the root directory with your OpenAI API key:
-```
-OPENAI_API_KEY=your_openai_api_key_here
-```
 
-## Usage
-
-### Transcript Extraction and Analysis (`get_transcript.py`)
-
-This script extracts the transcript from a YouTube video and analyzes it using OpenAI.
-
+### 3. Настройка API ключа
+Создайте файл `.env` в корневой папке:
 ```bash
-python get_transcript.py <youtube_url>
+OPENAI_API_KEY=your_api_key_here
 ```
 
-Example:
+### 4. Установка FFmpeg (для извлечения аудио)
+- **macOS**: `brew install ffmpeg`
+- **Ubuntu**: `sudo apt install ffmpeg`  
+- **Windows**: Скачайте с [ffmpeg.org](https://ffmpeg.org/)
+
+## 🎯 Использование
+
+### 🆕 **Рекомендуется: Новая система**
+
+#### Полный анализ встречи с хронологией:
 ```bash
-python get_transcript.py https://www.youtube.com/watch?v=dQw4w9WgXcQ
+cd New
+python updated-video-analyzer.py meeting.mp4 --chronological
 ```
 
-The script will:
-1. Extract the transcript from the YouTube video
-2. Send the transcript to OpenAI for analysis
-3. Save the transcript and analysis as both Markdown and JSON files in the `results` directory
-
-### Comprehensive Video Analysis (`youtube.py`)
-
-This script performs more advanced analysis including code extraction from video frames.
-
+#### Быстрый анализ нескольких файлов:
 ```bash
-python youtube.py <youtube_url> [options]
+cd New  
+python quick_analyze.py *.mp4 --full
 ```
 
-Options:
-- `--api-key`: OpenAI API key (if not specified, it's taken from OPENAI_API_KEY environment variable)
-- `--api-url`: API URL for LLM (default: OpenAI API URL)
-- `--whisper-model`: Whisper model size for transcript creation (choices: tiny, base, small, medium, large, default: tiny)
-- `--output`: Directory for output files (default: results)
-- `--temp`: Directory for temporary files (default: temp)
-- `--extract-code`: Flag to extract code frames from video (must be specified to enable code extraction)
-- `--video-quality`: Quality of downloaded video (choices: lowest, highest, default: highest)
-- `--interval`: Interval in seconds for frame extraction (default: 1)
+#### Основные параметры:
+- `--chronological` - Создать интегрированный хронологический отчет ⭐
+- `--whisper-model MODEL` - Модель Whisper (tiny/base/small/medium/large)
+- `--screenshot-mode MODE` - Режим скриншотов (smart/periodic/both)
+- `--output DIR` - Папка для результатов
 
-Example:
+### 📹 **Классические скрипты** (для YouTube)
+
+#### Простое извлечение транскрипта:
 ```bash
-python youtube.py https://www.youtube.com/watch?v=dQw4w9WgXcQ --whisper-model base --extract-code --interval 2
+python get_transcript.py https://www.youtube.com/watch?v=VIDEO_ID
 ```
 
-The script will:
-1. Download the video and audio
-2. Extract the transcript (from YouTube or using Whisper)
-3. Extract frames from the video at specified intervals (if --extract-code is set)
-4. Analyze frames to detect code snippets (if --extract-code is set)
-5. Use GPT to extract and identify code from frames (if --extract-code is set)
-6. Generate comprehensive analysis of the video content
-7. Save all results in the output directory
-
-## Extracting Code from Videos
-
-To extract code from video frames, you must use the `--extract-code` flag with the `youtube.py` script:
-
+#### Комплексный анализ с извлечением кода:
 ```bash
-python youtube.py https://www.youtube.com/watch?v=your_video_id --extract-code
+python youtube.py https://www.youtube.com/watch?v=VIDEO_ID --extract-code --whisper-model base
 ```
 
-### How Code Extraction Works
-
-1. The script first downloads the video from YouTube using the PyTubeFix library
-2. It then extracts frames at regular intervals (configurable with the `--interval` parameter)
-3. Each frame is analyzed to detect if it contains code
-4. Frames with potential code are processed using OpenAI's vision capabilities to extract the code
-5. The extracted code is identified by language and saved to the results directory
-
-### Best Practices for Code Extraction
-
-- Use videos with high resolution and clear code displays
-- Decrease the interval between frames to capture more code (e.g., `--interval 0.5`)
-- Use the highest video quality for better text recognition (default: `--video-quality highest`)
-- If the code isn't recognized correctly, try adjusting the contrast threshold in the script
-
-### Example Command for Optimized Code Extraction
-
+#### Загрузка видео в максимальном качестве:
 ```bash
-python youtube.py https://www.youtube.com/watch?v=your_video_id --extract-code --interval 0.5 --video-quality highest --whisper-model base
+./download_youtube.sh https://www.youtube.com/watch?v=VIDEO_ID
 ```
 
-## Creating Transcripts
+## 📊 Что получается на выходе
 
-There are two methods for creating transcripts:
+### 🆕 **Новая система**
+```
+results/
+├── video_name_INTEGRATED_chronological.md    # 🎯 Главный отчет
+├── video_name_integrated_data.json           # Структурированные данные  
+└── video_name_screenshots/                   # Папка со скриншотами
+    ├── screenshot_001_presentation_start.jpg
+    └── screenshot_002_diagram_shown.jpg
+```
 
-### 1. Using YouTube's Built-in Transcripts
+### 📹 **Классическая система**
+```
+results/
+├── VIDEO_ID_transcript.md     # Транскрипт и анализ
+├── VIDEO_ID_analysis.json     # JSON с результатами
+└── code_frames/               # Извлеченный код (если использовался --extract-code)
+```
 
-The simplest approach is to extract existing transcripts from YouTube:
+## 🔄 Миграция со старой системы
 
+**Устаревшие файлы** (можно удалить):
+- `youtube_improved.py` - заменен новой системой
+- `analyze_text.py` - функциональность включена в новые скрипты
+
+**Актуальные файлы**:
+- `New/` - основная рабочая система ✅
+- `youtube.py` - для работы с YouTube (при необходимости)
+- `download_youtube.sh` - для ручной загрузки видео
+
+## 🎯 Рекомендации по использованию
+
+### Для анализа встреч и презентаций:
 ```bash
-python get_transcript.py https://www.youtube.com/watch?v=your_video_id
+cd New
+python updated-video-analyzer.py meeting.mp4 --chronological --whisper-model base
 ```
 
-This method is fast but relies on the availability of transcripts on YouTube. Many videos, especially technical tutorials, include auto-generated or manually created captions.
-
-### 2. Creating Transcripts with Whisper
-
-When YouTube transcripts are unavailable or of poor quality, you can generate transcripts using OpenAI's Whisper model:
-
+### Для извлечения кода из YouTube:
 ```bash
-python youtube.py https://www.youtube.com/watch?v=your_video_id --whisper-model medium
+python youtube.py https://youtube.com/watch?v=ID --extract-code --interval 0.5
 ```
 
-The `--whisper-model` parameter specifies the Whisper model size:
-- `tiny`: Fastest but least accurate
-- `base`: Good balance of speed and accuracy
-- `small`: Better accuracy, slower
-- `medium`: High accuracy, slower
-- `large`: Best accuracy, slowest
+### Для быстрой обработки множества файлов:
+```bash
+cd New
+python quick_analyze.py /path/to/videos/*.mp4 --standard
+```
 
-### Processing and Formatting Transcripts
+## 🛠️ Устранение неполадок
 
-Both methods produce transcripts that are:
-1. Saved as plain text and included in Markdown analysis files
-2. Post-processed to match the timing with extracted frames (when using `youtube.py`)
-3. Stored in the output directory (default: `results`)
+- **Ошибки PyTube**: Переустановите `pytubefix`
+- **Проблемы с API**: Проверьте `.env` файл и ключ OpenAI
+- **OCR не работает**: Установите Tesseract
+- **Медленная работа**: Используйте `--whisper-model tiny` для быстрого анализа
 
-## Output
+## 📚 Дополнительная документация
 
-All results are saved in the output directory (default: `results`):
-- Transcript and analysis in Markdown format (`<video_id>_transcript.md`)
-- JSON file with complete analysis results (`<video_id>_analysis.json`)
-- Extracted code snippets from frames (when the `--extract-code` flag is used)
+- [Подробное руководство по новой системе](New/README_INTEGRATED.md)
+- [Примеры использования](New/test_chronological_output.md)
 
-## Tips
+## 📄 Лицензия
 
-- For better code extraction, use videos with clear, high-resolution code displays
-- The higher the quality of the downloaded video, the better the code recognition
-- If you encounter issues with YouTube transcript extraction, the script will fall back to Whisper for transcription
-- To save disk space, you can use `--video-quality lowest` when not extracting code
+Проект доступен для личного и образовательного использования.
 
-## Troubleshooting
+---
 
-- If you see errors related to PyTube, try reinstalling the pytubefix package
-- Ensure your OpenAI API key is correctly set in the `.env` file
-- For OCR issues, make sure Tesseract is properly installed on your system
-
-## License
-
-This project is available for personal and educational use. 
+💡 **Совет**: Начните с новой системы в папке `New/` - она предоставляет более мощные возможности анализа!
