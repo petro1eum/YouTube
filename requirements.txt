@@ -1,0 +1,39 @@
+# YouTube Video Analysis & Meeting Transcript System
+# Requirements
+
+# Core dependencies
+openai>=1.12.0
+python-dotenv>=1.0.0
+
+# Audio/Video processing
+opencv-python>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# Whisper для транскрипции
+openai-whisper>=20231117
+
+# Для работы с аудио
+librosa>=0.10.0
+soundfile>=0.12.0
+
+# MLX Whisper для Apple Silicon (опционально)
+mlx-whisper>=0.3.0; platform_machine == "arm64" and sys_platform == "darwin"
+
+# Для работы с YouTube (опционально)
+pytubefix>=6.0.0
+youtube-transcript-api>=0.6.0
+
+# Для извлечения аудио из видео
+moviepy>=1.0.3
+
+# Утилиты
+requests>=2.31.0
+
+# Для тестирования
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.12.0
+
+# Дополнительно для OCR (опционально)
+# pytesseract>=0.3.10

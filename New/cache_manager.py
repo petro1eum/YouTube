@@ -295,4 +295,6 @@ class CacheManager:
                 removed_count += 1
         
         if removed_count > 0:
-            logger.info(f"🧹 Удалено {removed_count} старых файлов кэша") 
+            logger.info(f"🧹 Удалено {removed_count} старых файлов кэша")
+
+        return removed_count 

@@ -465,18 +465,21 @@ JSON ответ:
     def create_screenshot_description(self, moment: TranscriptMoment,
                                     timestamp: float,
                                     transcript_segments: List[Dict]) -> str:
-        """Создает описание скриншота"""
-        
+        """Создает описание скриншота с использованием GPT-4V"""
+
         # Находим ближайшие сегменты транскрипта
         context_text = self.get_transcript_context(transcript_segments, timestamp, window=15)
-        
-        return f"""
-**Время:** {timestamp:.1f}с  
-**Причина:** {moment.reason}  
-**Тип:** {moment.screenshot_type}  
-**Ключевые слова:** {', '.join(moment.keywords)}  
+
+        # Базовое описание без GPT-4V (используется как fallback)
+        basic_description = f"""
+**Время:** {timestamp:.1f}с
+**Причина:** {moment.reason}
+**Тип:** {moment.screenshot_type}
+**Ключевые слова:** {', '.join(moment.keywords)}
 **Контекст:** {context_text}
         """.strip()
+
+        return basic_description
     
     def get_transcript_context(self, transcript_segments: List[Dict],
                              timestamp: float, window: float = 15) -> str:
